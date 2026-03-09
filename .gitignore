@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+build/
+dist/
+wheels/
+.venv/
+
+# Swift
+.build/
+
+# Data
+data/
+*.db
+
+# Audio slices (generated during transcript verification)
+.audio_slices/
+
+# Private docs (not for public repo)
+BUSINESS_PLAN.md
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Note: src/transcription_mcp/bin/SpeechCLI IS tracked (153KB pre-built binary)
