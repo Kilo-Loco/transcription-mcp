@@ -34,20 +34,21 @@ func transcribe(fileURL: URL, localeID: String) async throws {
         attributeOptions: [.audioTimeRange]
     )
 
-    // Check installed locales (normalize hyphen/underscore for comparison)
-    let installed = await SpeechTranscriber.installedLocales
-    let normalizedRequested = locale.identifier.replacingOccurrences(of: "-", with: "_")
-    let isInstalled = installed.contains(where: {
-        $0.identifier.replacingOccurrences(of: "-", with: "_") == normalizedRequested
-    })
-
-    if !isInstalled {
+    // Try to ensure the speech model is available.
+    // On most systems en-US ships with macOS — only download if truly missing.
+    do {
         if let request = try await AssetInventory.assetInstallationRequest(
             supporting: [transcriber]
         ) {
             FileHandle.standardError.write(Data("Downloading speech model for \(localeID)...\n".utf8))
             try await request.downloadAndInstall()
         }
+    } catch {
+        // Download failed (e.g. entitlements issue in CI). Proceed anyway —
+        // the model may already be installed and the check was wrong.
+        FileHandle.standardError.write(
+            Data("Warning: Could not verify speech model, proceeding anyway: \(error.localizedDescription)\n".utf8)
+        )
     }
 
     let analyzer = SpeechAnalyzer(modules: [transcriber])
