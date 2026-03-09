@@ -34,7 +34,10 @@ class TestTranscribeE2E:
         assert "error" not in result, f"Transcription failed: {result.get('error')}"
         assert "transcript_id" in result
         assert result["word_count"] > 0
-        assert result["duration_seconds"] > 0
+        assert "duration" in result  # Human-readable string like "1m 26s"
+
+        # Transcript text included in response
+        assert "transcript" in result or "transcript_preview" in result
 
         # .txt file written next to source
         txt_path = Path(result["transcript_file"])

@@ -10,32 +10,93 @@ from . import storage
 from .audio import extract_audio, extract_slice, get_audio_duration
 from .models import Engine, Segment, StoredTranscript
 
+# Maximum characters of transcript text to include inline in the tool response.
+# Beyond this, Claude should read the .txt file for the full text.
+_MAX_INLINE_TEXT = 10_000
+
 mcp = FastMCP(
     "Transcription MCP",
     instructions=(
         "Local transcription server using Apple SpeechAnalyzer (Neural Engine).\n\n"
         "WORKFLOW:\n"
-        "1. `transcribe` → transcribes the file, writes .txt and .srt files\n"
-        "   next to the source. Returns file paths, metadata, and transcript ID.\n"
-        "2. Read the .txt file. Apply formatting: capitalization, punctuation,\n"
-        "   and paragraph breaks. This is safe to do from text alone.\n"
-        "3. For words that look wrong or don't fit the context, use\n"
-        "   `get_audio_slice` with the timestamp range to listen to that\n"
-        "   section of audio. Only correct words you can confidently verify\n"
-        "   by hearing them.\n"
+        "1. Call `transcribe` with the file path. The response includes the\n"
+        "   transcript text, file paths for .txt and .srt files, and metadata.\n"
+        "2. Clean up the transcript: fix capitalization, punctuation, and add\n"
+        "   paragraph breaks at natural topic changes.\n"
+        "3. If the transcript was too long to include inline, read the .txt\n"
+        "   file path from the response to get the full text.\n"
         "4. Present the cleaned transcript to the user.\n\n"
         "IMPORTANT: Do NOT guess at word corrections from text alone.\n"
-        "Formatting (caps, punctuation, paragraphs) = safe from text.\n"
-        "Word corrections = must listen to the audio first.\n\n"
-        "CONSTRAINTS:\n"
-        "- Runs at ~76x realtime on Apple Neural Engine.\n"
+        "Formatting (caps, punctuation, paragraphs) = safe.\n"
+        "If a word looks wrong, leave it as-is — the neural engine output\n"
+        "is usually more accurate than a guess from context.\n\n"
+        "OUTPUT FILES:\n"
         "- The .srt file is ready for YouTube caption upload.\n"
-        "- Transcripts are stored in SQLite for full-text search.\n\n"
+        "- The .txt file contains the raw transcript.\n"
+        "- Both are written next to the source file.\n\n"
         "OTHER TOOLS (only use if explicitly asked):\n"
         "- `get_transcript`: retrieve word-level timestamps or specific sections\n"
+        "- `get_audio_slice`: extract a short audio clip for the user to review\n"
         "- `search_transcripts` / `list_transcripts`: search/browse past transcripts"
     ),
 )
+
+
+# Map bare language codes to their most common locale.
+_LOCALE_DEFAULTS = {
+    "en": "en-US",
+    "es": "es-ES",
+    "fr": "fr-FR",
+    "de": "de-DE",
+    "it": "it-IT",
+    "pt": "pt-BR",
+    "ja": "ja-JP",
+    "ko": "ko-KR",
+    "zh": "zh-CN",
+    "ru": "ru-RU",
+    "ar": "ar-SA",
+    "hi": "hi-IN",
+    "nl": "nl-NL",
+    "sv": "sv-SE",
+    "da": "da-DK",
+    "fi": "fi-FI",
+    "nb": "nb-NO",
+    "pl": "pl-PL",
+    "tr": "tr-TR",
+    "uk": "uk-UA",
+    "th": "th-TH",
+    "vi": "vi-VN",
+    "id": "id-ID",
+    "ms": "ms-MY",
+    "ca": "ca-ES",
+    "hr": "hr-HR",
+    "cs": "cs-CZ",
+    "el": "el-GR",
+    "he": "he-IL",
+    "hu": "hu-HU",
+    "ro": "ro-RO",
+    "sk": "sk-SK",
+}
+
+
+def _normalize_language(lang: str) -> str:
+    """Convert a bare language code to a full locale identifier."""
+    if "-" in lang or "_" in lang:
+        return lang  # Already a full locale like "en-US" or "en_GB"
+    return _LOCALE_DEFAULTS.get(lang, f"{lang}-{lang.upper()}")
+
+
+def _format_duration(seconds: float) -> str:
+    """Format seconds into a human-readable duration string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = int(minutes // 60)
+    mins = minutes % 60
+    return f"{hours}h {mins}m {secs}s"
 
 
 def _format_srt_time(seconds: float) -> str:
@@ -66,17 +127,18 @@ async def transcribe(
     file_path: str,
     language: str = "en",
 ) -> dict:
-    """Transcribe an audio or video file.
+    """Transcribe an audio or video file locally using Apple SpeechAnalyzer.
 
-    Produces a .txt transcript and .srt subtitle file next to the source file.
-    Also saves structured data to the searchable archive.
+    Returns the transcript text, .txt and .srt file paths, and metadata.
+    The .srt file is ready for YouTube caption upload.
 
     Args:
         file_path: Absolute path to the audio/video file.
-        language: Language code (e.g. "en"). Defaults to "en".
+        language: Language code (e.g. "en", "es", "ja") or full locale
+                  (e.g. "en-US", "en-GB"). Defaults to "en".
 
     Returns:
-        File paths for the transcript and SRT, plus metadata.
+        Transcript text (or preview for long files), file paths, and metadata.
     """
     source_path = Path(file_path)
     if not source_path.exists():
@@ -88,11 +150,7 @@ async def transcribe(
 
     try:
         duration = get_audio_duration(source_path)
-
-        # Run Apple SpeechAnalyzer
-        lang_arg = language
-        if "-" not in lang_arg and "_" not in lang_arg:
-            lang_arg = f"{lang_arg}-US"
+        lang_arg = _normalize_language(language)
 
         from .engines import apple_engine
 
@@ -100,8 +158,9 @@ async def transcribe(
         result.duration = duration
 
         # Write transcript text file
+        full_text = result.full_text
         txt_path = source_path.with_suffix(".txt")
-        txt_path.write_text(result.full_text, encoding="utf-8")
+        txt_path.write_text(full_text, encoding="utf-8")
 
         # Write SRT subtitle file
         srt_path = source_path.with_suffix(".srt")
@@ -117,14 +176,24 @@ async def transcribe(
         )
         transcript_id = await storage.save_transcript(transcript)
 
-        return {
+        response = {
             "transcript_id": transcript_id,
-            "source_file": str(source_path),
+            "duration": _format_duration(duration),
+            "word_count": len(result.words),
             "transcript_file": str(txt_path),
             "srt_file": str(srt_path),
-            "duration_seconds": round(duration, 1),
-            "word_count": len(result.words),
         }
+
+        # Include transcript text inline when it fits; otherwise provide
+        # a preview so Claude can present something immediately.
+        if len(full_text) <= _MAX_INLINE_TEXT:
+            response["transcript"] = full_text
+        else:
+            response["transcript_preview"] = full_text[:_MAX_INLINE_TEXT]
+            response["transcript_truncated"] = True
+            response["full_text_chars"] = len(full_text)
+
+        return response
 
     finally:
         if cleanup_audio:
@@ -137,19 +206,18 @@ async def get_audio_slice(
     start_time: float,
     end_time: float,
 ) -> dict:
-    """Extract a short audio clip from a transcribed file for verification.
+    """Extract a short audio clip from a transcribed file.
 
-    Use this to listen to a section of audio when a transcribed word
-    looks wrong or doesn't fit the context. Returns the path to an
-    audio file that can be played/read.
+    Use this when the user wants to hear a specific section of audio,
+    or to verify what was said at a particular timestamp.
 
     Args:
-        transcript_id: The transcript ID (to look up the source file).
+        transcript_id: The transcript ID (from a previous transcribe call).
         start_time: Start time in seconds.
-        end_time: End time in seconds.
+        end_time: End time in seconds (max 30s clip).
 
     Returns:
-        Path to the extracted audio slice.
+        Path to the extracted audio clip (.m4a).
     """
     transcript = await storage.get_transcript(transcript_id)
     if transcript is None:
@@ -193,9 +261,9 @@ async def get_transcript(
 
     Args:
         transcript_id: The transcript ID.
-        format: Output format — "words" or "segments".
-        start_time: Filter to words after this time (seconds).
-        end_time: Filter to words before this time (seconds).
+        format: Output format — "words" (with timestamps) or "segments".
+        start_time: Filter to content after this time (seconds).
+        end_time: Filter to content before this time (seconds).
     """
     transcript = await storage.get_transcript(transcript_id)
     if transcript is None:
