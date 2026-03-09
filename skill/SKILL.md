@@ -14,7 +14,7 @@ metadata:
       bins:
         - ffmpeg
         - python3
-    homepage: https://github.com/kiloloco/transcription-mcp
+    homepage: https://github.com/Kilo-Loco/transcription-mcp
 compatibility: macOS 26+ only. Requires ffmpeg (brew install ffmpeg) and Apple Silicon.
 ---
 
