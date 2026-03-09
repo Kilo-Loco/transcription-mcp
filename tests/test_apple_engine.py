@@ -76,14 +76,23 @@ class TestCheckPlatform:
         with pytest.raises(RuntimeError, match="requires macOS 26.0"):
             apple_engine._check_platform()
 
+    def test_rejects_intel_mac(self, monkeypatch):
+        monkeypatch.setattr("platform.system", lambda: "Darwin")
+        monkeypatch.setattr("platform.release", lambda: "25.0.0")
+        monkeypatch.setattr("platform.machine", lambda: "x86_64")
+        with pytest.raises(RuntimeError, match="requires Apple Silicon"):
+            apple_engine._check_platform()
+
     def test_accepts_macos_26(self, monkeypatch):
         monkeypatch.setattr("platform.system", lambda: "Darwin")
         monkeypatch.setattr("platform.release", lambda: "25.0.0")
+        monkeypatch.setattr("platform.machine", lambda: "arm64")
         apple_engine._check_platform()  # should not raise
 
     def test_accepts_future_macos(self, monkeypatch):
         monkeypatch.setattr("platform.system", lambda: "Darwin")
         monkeypatch.setattr("platform.release", lambda: "26.3.0")
+        monkeypatch.setattr("platform.machine", lambda: "arm64")
         apple_engine._check_platform()  # should not raise
 
 

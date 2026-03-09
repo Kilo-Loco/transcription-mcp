@@ -24,6 +24,15 @@ def _check_platform() -> None:
             "transcription-mcp requires macOS 26.0 or later. "
             f"You are running Darwin {platform.release()}."
         )
+    # SpeechAnalyzer requires Apple Silicon (Neural Engine)
+    arch = platform.machine()
+    if arch != "arm64":
+        raise RuntimeError(
+            "transcription-mcp requires Apple Silicon (M1 or later). "
+            f"Detected architecture: {arch}. "
+            "SpeechAnalyzer uses the Neural Engine, which is only available "
+            "on Apple Silicon Macs."
+        )
 
 
 def _find_cli_binary() -> Path | None:

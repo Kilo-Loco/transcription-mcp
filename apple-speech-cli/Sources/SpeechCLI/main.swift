@@ -157,6 +157,21 @@ guard FileManager.default.fileExists(atPath: filePath) else {
     exit(1)
 }
 
+// Check for Apple Silicon — SpeechAnalyzer requires the Neural Engine
+var systemInfo = utsname()
+uname(&systemInfo)
+let machine = withUnsafePointer(to: &systemInfo.machine) {
+    $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+        String(cString: $0)
+    }
+}
+guard machine == "arm64" else {
+    FileHandle.standardError.write(
+        Data("Error: Apple Silicon (M1 or later) is required. Detected architecture: \(machine)\nSpeechAnalyzer uses the Neural Engine, which is only available on Apple Silicon Macs.\n".utf8)
+    )
+    exit(1)
+}
+
 if #available(macOS 26.0, *) {
     do {
         try await transcribe(fileURL: fileURL, localeID: localeID)
