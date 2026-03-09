@@ -24,6 +24,7 @@ from transcription_mcp.server import (
 
 
 @pytest.mark.asyncio
+@pytest.mark.speechanalyzer
 class TestTranscribeE2E:
     """Real transcription through Apple SpeechAnalyzer."""
 

@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: macos-26
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: Install package with test dependencies
+        run: uv pip install --system ".[test]"
+
+      - name: Verify package imports
+        run: python -c "from transcription_mcp.server import mcp; print('Package imports OK')"
+
+      - name: Verify CLI entry point is installed
+        run: which transcription-mcp
+
+      - name: Build wheel and check contents
+        run: |
+          uv build
+          python -m zipfile -l dist/*.whl
+
+      - name: Build Swift CLI
+        run: swift build -c release
+        working-directory: apple-speech-cli
+
+      - name: Run unit and integration tests
+        run: pytest tests/ -v -m "not speechanalyzer"
+
+  e2e:
+    name: E2E (SpeechAnalyzer)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: Install package with test dependencies
+        run: uv pip install --system ".[test]"
+
+      - name: Build Swift CLI
+        run: swift build -c release
+        working-directory: apple-speech-cli
+
+      - name: Run SpeechAnalyzer e2e tests
+        run: pytest tests/test_e2e.py -v
