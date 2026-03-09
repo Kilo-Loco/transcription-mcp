@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Local transcription at 76x realtime using Apple SpeechAnalyzer. YouTube-ready SRT captions. Zero API costs."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 authors = [
     { name = "Kilo Loco", email = "kilo@kiloloco.com" },
 ]
@@ -28,7 +28,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

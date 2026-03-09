@@ -181,6 +181,10 @@ class TestListAndSearch:
         result = await search_transcripts("xyznonexistentword123")
         assert result["count"] == 0
 
+    async def test_search_malformed_query_returns_error(self, isolated_db):
+        result = await search_transcripts('"unbalanced quote')
+        assert "error" in result
+
 
 @pytest.mark.asyncio
 class TestGetAudioSlice:

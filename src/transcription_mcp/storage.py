@@ -134,19 +134,29 @@ async def list_transcripts() -> list[dict]:
 
 
 async def search_transcripts(query: str, limit: int = 20) -> list[dict]:
-    """Full-text search across all transcripts."""
+    """Full-text search across all transcripts.
+
+    Raises ValueError on malformed FTS5 query syntax.
+    """
     db = await _get_db()
     try:
-        cursor = await db.execute(
-            """SELECT t.id, t.source_file, t.created_at, t.duration,
-                      snippet(transcripts_fts, 0, '>>>', '<<<', '...', 40) as snippet
-               FROM transcripts_fts
-               JOIN transcripts t ON transcripts_fts.rowid = t.rowid
-               WHERE transcripts_fts MATCH ?
-               ORDER BY rank
-               LIMIT ?""",
-            (query, limit),
-        )
+        try:
+            cursor = await db.execute(
+                """SELECT t.id, t.source_file, t.created_at, t.duration,
+                          snippet(transcripts_fts, 0, '>>>', '<<<', '...', 40) as snippet
+                   FROM transcripts_fts
+                   JOIN transcripts t ON transcripts_fts.rowid = t.rowid
+                   WHERE transcripts_fts MATCH ?
+                   ORDER BY rank
+                   LIMIT ?""",
+                (query, limit),
+            )
+        except Exception as exc:
+            # FTS5 raises OperationalError on malformed queries (unbalanced
+            # quotes, bare AND/OR, etc.).  Surface as ValueError so callers
+            # can return a user-friendly message.
+            raise ValueError(f"Invalid search query: {exc}") from exc
+
         rows = await cursor.fetchall()
         return [
             {

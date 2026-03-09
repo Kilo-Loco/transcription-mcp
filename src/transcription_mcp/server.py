@@ -266,7 +266,10 @@ async def search_transcripts(query: str, limit: int = 20) -> dict:
         query: Search query (supports FTS5 syntax: AND, OR, NOT, phrases).
         limit: Maximum number of results (default 20).
     """
-    results = await storage.search_transcripts(query, limit)
+    try:
+        results = await storage.search_transcripts(query, limit)
+    except ValueError as exc:
+        return {"error": str(exc)}
     return {"query": query, "count": len(results), "results": results}
 
 

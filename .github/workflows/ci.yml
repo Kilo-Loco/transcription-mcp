@@ -48,12 +48,13 @@ jobs:
       - name: Run unit and integration tests
         run: pytest tests/ -v -m "not speechanalyzer"
 
-  e2e:
-    name: E2E (SpeechAnalyzer)
+  e2e-speechanalyzer:
+    name: E2E (SpeechAnalyzer hardware)
     runs-on: macos-26
-    # SpeechAnalyzer requires Neural Engine hardware — CI VMs may not support it.
-    # This job validates the pipeline compiles and non-transcription e2e tests pass.
-    # Actual transcription tests are best validated on real hardware.
+    needs: test
+    # SpeechAnalyzer transcription requires Neural Engine hardware that
+    # CI VMs don't fully support. This job runs only the hardware-dependent
+    # tests and does not block the pipeline.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -74,5 +75,5 @@ jobs:
         run: swift build -c release
         working-directory: apple-speech-cli
 
-      - name: Run SpeechAnalyzer e2e tests
-        run: pytest tests/test_e2e.py -v
+      - name: Run SpeechAnalyzer transcription tests
+        run: pytest tests/test_e2e.py -v -m speechanalyzer

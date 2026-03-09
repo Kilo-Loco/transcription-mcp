@@ -133,3 +133,20 @@ class TestDeleteTranscript:
         await storage.delete_transcript(transcript_with_text.id)
         results = await storage.search_transcripts("Claude")
         assert len(results) == 0
+
+
+@pytest.mark.asyncio
+class TestSearchQueryValidation:
+    """FTS5 query syntax errors should raise ValueError, not crash."""
+
+    async def test_malformed_query_raises_valueerror(self, isolated_db):
+        with pytest.raises(ValueError, match="Invalid search query"):
+            await storage.search_transcripts('"unbalanced quote')
+
+    async def test_bare_operator_raises_valueerror(self, isolated_db):
+        with pytest.raises(ValueError, match="Invalid search query"):
+            await storage.search_transcripts("AND")
+
+    async def test_valid_query_does_not_raise(self, isolated_db):
+        results = await storage.search_transcripts("hello")
+        assert isinstance(results, list)
