@@ -74,7 +74,7 @@ Claude will transcribe the file, clean up the output, and present the formatted 
   ```bash
   brew install ffmpeg
   ```
-- **Python 3.10+**
+- **Python 3.11+**
 
 ## How It Works
 

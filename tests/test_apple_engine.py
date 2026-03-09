@@ -94,16 +94,16 @@ class TestCheckPlatform:
 
 class TestFindCliBinary:
     def test_finds_bundled_binary(self, tmp_path, monkeypatch):
-        """Should return the bundled package binary when it exists."""
+        """Should return the built binary inside the bundled package source."""
         # Layout: <root>/transcription_mcp/engines/apple_engine.py
-        #         <root>/transcription_mcp/bin/SpeechCLI
+        #         <root>/transcription_mcp/apple-speech-cli/.build/release/SpeechCLI
         engine_dir = tmp_path / "transcription_mcp" / "engines"
         engine_dir.mkdir(parents=True)
         fake_file = engine_dir / "apple_engine.py"
         fake_file.touch()
 
-        bin_dir = tmp_path / "transcription_mcp" / "bin"
-        bin_dir.mkdir()
+        bin_dir = tmp_path / "transcription_mcp" / "apple-speech-cli" / ".build" / "release"
+        bin_dir.mkdir(parents=True)
         binary = bin_dir / "SpeechCLI"
         binary.touch()
 

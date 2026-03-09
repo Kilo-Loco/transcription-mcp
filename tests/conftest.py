@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from transcription_mcp.models import Engine, Segment, StoredTranscript, TranscriptResult, Word
 
@@ -22,10 +23,10 @@ def tmp_dir(tmp_path):
 
 @pytest.fixture
 def sample_audio(tmp_dir):
-    """Copy the real MP3 to a temp dir so tests don't pollute the source."""
+    """Copy the real audio to a temp dir so tests don't pollute the source."""
     if not REAL_AUDIO.exists():
-        pytest.skip(f"Test MP3 not found: {REAL_AUDIO}")
-    dest = tmp_dir / "test_audio.mp3"
+        pytest.skip(f"Test audio not found: {REAL_AUDIO}")
+    dest = tmp_dir / "test_audio.m4a"
     shutil.copy2(REAL_AUDIO, dest)
     return dest
 
@@ -53,7 +54,7 @@ def sample_transcript_result():
 
 @pytest.fixture
 def sample_stored_transcript(sample_transcript_result, sample_audio):
-    """Build a StoredTranscript backed by the sample MP3."""
+    """Build a StoredTranscript backed by the sample audio."""
     return StoredTranscript(
         source_file=str(sample_audio),
         duration=3.0,
@@ -63,29 +64,29 @@ def sample_stored_transcript(sample_transcript_result, sample_audio):
     )
 
 
-@pytest.fixture
-def isolated_db(tmp_dir, monkeypatch):
+@pytest_asyncio.fixture
+async def isolated_db(tmp_dir, monkeypatch):
     """Point storage at a temp database so tests don't touch production data."""
     import transcription_mcp.storage as storage_mod
+
+    # Reset the singleton connection so it picks up the new path
+    await storage_mod.close()
 
     db_dir = tmp_dir / "data"
     db_dir.mkdir()
     monkeypatch.setattr(storage_mod, "_DB_DIR", db_dir)
     monkeypatch.setattr(storage_mod, "_DB_PATH", db_dir / "test.db")
 
+    yield
 
-@pytest.fixture
-def saved_transcript(sample_stored_transcript, isolated_db):
+    # Clean up the singleton after each test
+    await storage_mod.close()
+
+
+@pytest_asyncio.fixture
+async def saved_transcript(sample_stored_transcript, isolated_db):
     """Save the sample transcript to the isolated DB and return its ID."""
-    import asyncio
-
     from transcription_mcp import storage
 
-    loop = asyncio.new_event_loop()
-    try:
-        tid = loop.run_until_complete(
-            storage.save_transcript(sample_stored_transcript)
-        )
-    finally:
-        loop.close()
+    tid = await storage.save_transcript(sample_stored_transcript)
     return tid, sample_stored_transcript

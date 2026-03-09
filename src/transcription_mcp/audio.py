@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+
+def _check_ffmpeg() -> None:
+    """Fail fast with a clear message if ffmpeg/ffprobe are not installed."""
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError(
+            "ffmpeg is required but not found.\n"
+            "Install it with: brew install ffmpeg"
+        )
 
 
 def extract_audio(input_path: str | Path, sample_rate: int = 16000) -> Path:
@@ -18,9 +28,11 @@ def extract_audio(input_path: str | Path, sample_rate: int = 16000) -> Path:
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     suffix = input_path.suffix.lower()
-    # If already a WAV at the right sample rate, return as-is
+    # If already a WAV, return as-is
     if suffix == ".wav":
         return input_path
+
+    _check_ffmpeg()
 
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp.close()
@@ -65,6 +77,8 @@ def extract_slice(
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
+    _check_ffmpeg()
+
     if output_path is None:
         tmp = tempfile.NamedTemporaryFile(suffix=".m4a", delete=False)
         tmp.close()
@@ -94,6 +108,7 @@ def extract_slice(
 
 def get_audio_duration(file_path: str | Path) -> float:
     """Get the duration of an audio/video file in seconds."""
+    _check_ffmpeg()
     cmd = [
         "ffprobe",
         "-v", "error",

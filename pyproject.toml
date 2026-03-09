@@ -68,7 +68,6 @@ build-backend = "hatchling.build"
 packages = ["src/transcription_mcp"]
 artifacts = [
     "*.swift",
-    "bin/*",
 ]
 
 [tool.hatch.build.targets.sdist]

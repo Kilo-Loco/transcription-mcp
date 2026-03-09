@@ -4,7 +4,7 @@ These tests require:
 - macOS 26 with Apple SpeechAnalyzer
 - The Swift CLI built (auto-builds on first run)
 - ffmpeg installed
-- A real MP3 test fixture (86s+ — SpeechAnalyzer needs files >60s)
+- A real audio fixture with speech
 """
 
 from __future__ import annotations

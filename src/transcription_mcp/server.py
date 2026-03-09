@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -104,7 +105,7 @@ def _format_srt_time(seconds: float) -> str:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
-    millis = int((seconds % 1) * 1000)
+    millis = round((seconds % 1) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
@@ -144,17 +145,23 @@ async def transcribe(
     if not source_path.exists():
         return {"error": f"File not found: {file_path}"}
 
-    # Extract audio to WAV if needed
-    audio_path = extract_audio(source_path)
+    # Extract audio to WAV if needed (run blocking ffmpeg off the event loop)
+    try:
+        audio_path = await asyncio.to_thread(extract_audio, source_path)
+    except (RuntimeError, FileNotFoundError) as exc:
+        return {"error": f"Audio extraction failed: {exc}"}
     cleanup_audio = audio_path != source_path
 
     try:
-        duration = get_audio_duration(source_path)
+        duration = await asyncio.to_thread(get_audio_duration, source_path)
         lang_arg = _normalize_language(language)
 
         from .engines import apple_engine
 
-        result = apple_engine.transcribe(audio_path, language=lang_arg)
+        # Run the blocking Swift CLI transcription off the event loop
+        result = await asyncio.to_thread(
+            apple_engine.transcribe, audio_path, lang_arg
+        )
         result.duration = duration
 
         # Write transcript text file
@@ -194,6 +201,9 @@ async def transcribe(
             response["full_text_chars"] = len(full_text)
 
         return response
+
+    except Exception as exc:
+        return {"error": f"Transcription failed: {exc}"}
 
     finally:
         if cleanup_audio:
@@ -238,7 +248,9 @@ async def get_audio_slice(
     slice_path = slice_dir / f"{transcript_id}_{start_time:.1f}-{end_time:.1f}.m4a"
 
     try:
-        result_path = extract_slice(source_path, start_time, end_time, slice_path)
+        result_path = await asyncio.to_thread(
+            extract_slice, source_path, start_time, end_time, slice_path
+        )
     except Exception as e:
         return {"error": f"Failed to extract audio slice: {e}"}
 
@@ -346,6 +358,24 @@ async def list_transcripts() -> dict:
     """List all stored transcripts with metadata."""
     transcripts = await storage.list_transcripts()
     return {"count": len(transcripts), "transcripts": transcripts}
+
+
+@mcp.tool()
+async def delete_transcript(transcript_id: str) -> dict:
+    """Delete a stored transcript by ID.
+
+    Use this when the user wants to remove a transcript from the archive.
+
+    Args:
+        transcript_id: The transcript ID to delete.
+
+    Returns:
+        Whether the transcript was found and deleted.
+    """
+    deleted = await storage.delete_transcript(transcript_id)
+    if deleted:
+        return {"deleted": True, "transcript_id": transcript_id}
+    return {"error": f"Transcript not found: {transcript_id}"}
 
 
 def main():

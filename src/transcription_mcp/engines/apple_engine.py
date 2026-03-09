@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import platform
 import subprocess
-import sys
 from pathlib import Path
 
 from ..models import Engine, Segment, TranscriptResult, Word
@@ -28,9 +27,10 @@ def _check_platform() -> None:
 
 
 def _find_cli_binary() -> Path | None:
-    """Search for the SpeechCLI binary in multiple locations."""
-    # 1. Bundled binary inside the installed Python package
-    pkg_bin = Path(__file__).resolve().parent.parent / "bin" / "SpeechCLI"
+    """Search for the SpeechCLI binary in known locations."""
+    # 1. Built binary inside the installed/bundled package source
+    pkg_src = Path(__file__).resolve().parent.parent / "apple-speech-cli"
+    pkg_bin = pkg_src / ".build" / "release" / "SpeechCLI"
     if pkg_bin.exists():
         return pkg_bin
 

@@ -57,80 +57,89 @@ CREATE TRIGGER IF NOT EXISTS transcripts_au AFTER UPDATE ON transcripts BEGIN
 END;
 """
 
+# Singleton connection — initialized on first use, reused thereafter.
+_db: aiosqlite.Connection | None = None
+_schema_initialized: bool = False
+
 
 async def _get_db() -> aiosqlite.Connection:
-    _DB_DIR.mkdir(parents=True, exist_ok=True)
-    db = await aiosqlite.connect(str(_DB_PATH))
-    await db.executescript(_SCHEMA)
-    return db
+    global _db, _schema_initialized
+    if _db is None:
+        _DB_DIR.mkdir(parents=True, exist_ok=True)
+        _db = await aiosqlite.connect(str(_DB_PATH))
+        _schema_initialized = False
+    if not _schema_initialized:
+        await _db.executescript(_SCHEMA)
+        _schema_initialized = True
+    return _db
+
+
+async def close() -> None:
+    """Close the database connection. Safe to call multiple times."""
+    global _db, _schema_initialized
+    if _db is not None:
+        await _db.close()
+        _db = None
+        _schema_initialized = False
 
 
 async def save_transcript(transcript: StoredTranscript) -> str:
     """Save a transcript to the database. Returns the transcript ID."""
     db = await _get_db()
-    try:
-        engines_json = json.dumps([e.value for e in transcript.engines_used])
-        data_json = transcript.model_dump_json()
-        full_text = transcript.full_text
+    engines_json = json.dumps([e.value for e in transcript.engines_used])
+    data_json = transcript.model_dump_json()
+    full_text = transcript.full_text
 
-        await db.execute(
-            """INSERT OR REPLACE INTO transcripts
-               (id, source_file, created_at, duration, language, engines_used, full_text, data)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                transcript.id,
-                transcript.source_file,
-                transcript.created_at,
-                transcript.duration,
-                transcript.language,
-                engines_json,
-                full_text,
-                data_json,
-            ),
-        )
-        await db.commit()
-        return transcript.id
-    finally:
-        await db.close()
+    await db.execute(
+        """INSERT OR REPLACE INTO transcripts
+           (id, source_file, created_at, duration, language, engines_used, full_text, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            transcript.id,
+            transcript.source_file,
+            transcript.created_at,
+            transcript.duration,
+            transcript.language,
+            engines_json,
+            full_text,
+            data_json,
+        ),
+    )
+    await db.commit()
+    return transcript.id
 
 
 async def get_transcript(transcript_id: str) -> StoredTranscript | None:
     """Retrieve a transcript by ID."""
     db = await _get_db()
-    try:
-        cursor = await db.execute(
-            "SELECT data FROM transcripts WHERE id = ?", (transcript_id,)
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        return StoredTranscript.model_validate_json(row[0])
-    finally:
-        await db.close()
+    cursor = await db.execute(
+        "SELECT data FROM transcripts WHERE id = ?", (transcript_id,)
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return StoredTranscript.model_validate_json(row[0])
 
 
 async def list_transcripts() -> list[dict]:
     """List all transcripts with summary metadata."""
     db = await _get_db()
-    try:
-        cursor = await db.execute(
-            """SELECT id, source_file, created_at, duration, language, engines_used
-               FROM transcripts ORDER BY created_at DESC"""
-        )
-        rows = await cursor.fetchall()
-        return [
-            {
-                "id": r[0],
-                "source_file": r[1],
-                "created_at": r[2],
-                "duration": r[3],
-                "language": r[4],
-                "engines_used": json.loads(r[5]),
-            }
-            for r in rows
-        ]
-    finally:
-        await db.close()
+    cursor = await db.execute(
+        """SELECT id, source_file, created_at, duration, language, engines_used
+           FROM transcripts ORDER BY created_at DESC"""
+    )
+    rows = await cursor.fetchall()
+    return [
+        {
+            "id": r[0],
+            "source_file": r[1],
+            "created_at": r[2],
+            "duration": r[3],
+            "language": r[4],
+            "engines_used": json.loads(r[5]),
+        }
+        for r in rows
+    ]
 
 
 async def search_transcripts(query: str, limit: int = 20) -> list[dict]:
@@ -140,46 +149,40 @@ async def search_transcripts(query: str, limit: int = 20) -> list[dict]:
     """
     db = await _get_db()
     try:
-        try:
-            cursor = await db.execute(
-                """SELECT t.id, t.source_file, t.created_at, t.duration,
-                          snippet(transcripts_fts, 0, '>>>', '<<<', '...', 40) as snippet
-                   FROM transcripts_fts
-                   JOIN transcripts t ON transcripts_fts.rowid = t.rowid
-                   WHERE transcripts_fts MATCH ?
-                   ORDER BY rank
-                   LIMIT ?""",
-                (query, limit),
-            )
-        except Exception as exc:
-            # FTS5 raises OperationalError on malformed queries (unbalanced
-            # quotes, bare AND/OR, etc.).  Surface as ValueError so callers
-            # can return a user-friendly message.
-            raise ValueError(f"Invalid search query: {exc}") from exc
+        cursor = await db.execute(
+            """SELECT t.id, t.source_file, t.created_at, t.duration,
+                      snippet(transcripts_fts, 0, '>>>', '<<<', '...', 40) as snippet
+               FROM transcripts_fts
+               JOIN transcripts t ON transcripts_fts.rowid = t.rowid
+               WHERE transcripts_fts MATCH ?
+               ORDER BY rank
+               LIMIT ?""",
+            (query, limit),
+        )
+    except Exception as exc:
+        # FTS5 raises OperationalError on malformed queries (unbalanced
+        # quotes, bare AND/OR, etc.).  Surface as ValueError so callers
+        # can return a user-friendly message.
+        raise ValueError(f"Invalid search query: {exc}") from exc
 
-        rows = await cursor.fetchall()
-        return [
-            {
-                "id": r[0],
-                "source_file": r[1],
-                "created_at": r[2],
-                "duration": r[3],
-                "snippet": r[4],
-            }
-            for r in rows
-        ]
-    finally:
-        await db.close()
+    rows = await cursor.fetchall()
+    return [
+        {
+            "id": r[0],
+            "source_file": r[1],
+            "created_at": r[2],
+            "duration": r[3],
+            "snippet": r[4],
+        }
+        for r in rows
+    ]
 
 
 async def delete_transcript(transcript_id: str) -> bool:
     """Delete a transcript by ID. Returns True if deleted."""
     db = await _get_db()
-    try:
-        cursor = await db.execute(
-            "DELETE FROM transcripts WHERE id = ?", (transcript_id,)
-        )
-        await db.commit()
-        return cursor.rowcount > 0
-    finally:
-        await db.close()
+    cursor = await db.execute(
+        "DELETE FROM transcripts WHERE id = ?", (transcript_id,)
+    )
+    await db.commit()
+    return cursor.rowcount > 0
