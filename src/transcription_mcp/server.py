@@ -15,18 +15,30 @@ from .models import Engine, Segment, StoredTranscript
 # Beyond this, Claude should read the .txt file for the full text.
 _MAX_INLINE_TEXT = 10_000
 
+# Maximum segments or words to return inline from get_transcript.
+# For longer transcripts, Claude should use time ranges or read the .txt file.
+_MAX_INLINE_ITEMS = 200
+
 mcp = FastMCP(
     "Transcription MCP",
     instructions=(
         "Local transcription server using Apple SpeechAnalyzer (Neural Engine).\n\n"
         "WORKFLOW:\n"
         "1. Call `transcribe` with the file path. The response includes the\n"
-        "   transcript text, file paths for .txt and .srt files, and metadata.\n"
-        "2. Clean up the transcript: fix capitalization, punctuation, and add\n"
-        "   paragraph breaks at natural topic changes.\n"
-        "3. If the transcript was too long to include inline, read the .txt\n"
-        "   file path from the response to get the full text.\n"
+        "   transcript text (or a preview), file paths, and metadata.\n"
+        "2. For short transcripts (included inline): clean up capitalization,\n"
+        "   punctuation, and add paragraph breaks at natural topic changes.\n"
+        "3. For long transcripts (truncated): read the .txt file path from\n"
+        "   the response using the Read tool. Read it in chunks if needed.\n"
         "4. Present the cleaned transcript to the user.\n\n"
+        "LARGE FILE HANDLING:\n"
+        "- `transcribe` returns the full text inline for short files.\n"
+        "  For long files, it returns a preview + the .txt file path.\n"
+        "- `get_transcript` returns up to 200 segments/words inline.\n"
+        "  For longer transcripts, use start_time/end_time to fetch\n"
+        "  specific sections, or read the .txt file directly.\n"
+        "- NEVER try to load an entire long transcript through MCP tools.\n"
+        "  Use the .txt file with the Read tool instead.\n\n"
         "IMPORTANT: Do NOT guess at word corrections from text alone.\n"
         "Formatting (caps, punctuation, paragraphs) = safe.\n"
         "If a word looks wrong, leave it as-is — the neural engine output\n"
@@ -38,7 +50,8 @@ mcp = FastMCP(
         "OTHER TOOLS (only use if explicitly asked):\n"
         "- `get_transcript`: retrieve word-level timestamps or specific sections\n"
         "- `get_audio_slice`: extract a short audio clip for the user to review\n"
-        "- `search_transcripts` / `list_transcripts`: search/browse past transcripts"
+        "- `search_transcripts` / `list_transcripts`: search/browse past transcripts\n"
+        "- `delete_transcript`: remove a transcript from the archive"
     ),
 )
 
@@ -269,7 +282,10 @@ async def get_transcript(
     start_time: float | None = None,
     end_time: float | None = None,
 ) -> dict:
-    """Retrieve a stored transcript by ID.
+    """Retrieve a stored transcript by ID with optional time filtering.
+
+    For long transcripts, use start_time/end_time to fetch specific sections
+    rather than loading everything at once.
 
     Args:
         transcript_id: The transcript ID.
@@ -292,18 +308,32 @@ async def get_transcript(
         words = [w for w in words if w.start <= end_time]
 
     if format == "words":
-        return {
+        word_data = [
+            {
+                "word": w.word,
+                "start": round(w.start, 3),
+                "end": round(w.end, 3),
+                "confidence": round(w.confidence, 3),
+            }
+            for w in words
+        ]
+        response: dict = {
             "transcript_id": transcript_id,
-            "words": [
-                {
-                    "word": w.word,
-                    "start": round(w.start, 3),
-                    "end": round(w.end, 3),
-                    "confidence": round(w.confidence, 3),
-                }
-                for w in words
-            ],
+            "total_words": len(result.words),
+            "returned_words": len(word_data),
         }
+        # Cap inline output — for large results, tell Claude to use
+        # the .txt file or narrow the time range.
+        if len(word_data) > _MAX_INLINE_ITEMS:
+            response["words"] = word_data[:_MAX_INLINE_ITEMS]
+            response["truncated"] = True
+            response["hint"] = (
+                "Result truncated. Use start_time/end_time to fetch "
+                "specific sections, or read the .txt file directly."
+            )
+        else:
+            response["words"] = word_data
+        return response
     else:  # segments
         segments = result.segments
         if start_time is not None or end_time is not None:
@@ -332,10 +362,21 @@ async def get_transcript(
                 for s in segments
             ]
 
-        return {
+        response = {
             "transcript_id": transcript_id,
-            "segments": seg_data,
+            "total_segments": len(result.segments),
+            "returned_segments": len(seg_data),
         }
+        if len(seg_data) > _MAX_INLINE_ITEMS:
+            response["segments"] = seg_data[:_MAX_INLINE_ITEMS]
+            response["truncated"] = True
+            response["hint"] = (
+                "Result truncated. Use start_time/end_time to fetch "
+                "specific sections, or read the .txt file directly."
+            )
+        else:
+            response["segments"] = seg_data
+        return response
 
 
 @mcp.tool()
